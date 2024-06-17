@@ -22,7 +22,7 @@ use ruff_text_size::Ranged;
 
 use crate::directives;
 use crate::fix::{fix_file, FixResult};
-use crate::linter::{check_path, LinterResult};
+use crate::linter::check_path;
 use crate::message::{Emitter, EmitterContext, Message, TextEmitter};
 use crate::packaging::detect_package_root;
 use crate::registry::AsRule;
@@ -119,10 +119,7 @@ pub(crate) fn test_contents<'a>(
         &locator,
         &indexer,
     );
-    let LinterResult {
-        data: diagnostics,
-        error,
-    } = check_path(
+    let diagnostics = check_path(
         path,
         path.parent()
             .and_then(|parent| detect_package_root(parent, &settings.namespace_packages)),
@@ -137,7 +134,7 @@ pub(crate) fn test_contents<'a>(
         &parsed,
     );
 
-    let source_has_errors = error.is_some();
+    let source_has_errors = !parsed.is_valid();
 
     // Detect fixes that don't converge after multiple iterations.
     let mut iterations = 0;
@@ -186,10 +183,7 @@ pub(crate) fn test_contents<'a>(
                 &indexer,
             );
 
-            let LinterResult {
-                data: fixed_diagnostics,
-                error: fixed_error,
-            } = check_path(
+            let fixed_diagnostics = check_path(
                 path,
                 None,
                 &locator,
@@ -203,13 +197,13 @@ pub(crate) fn test_contents<'a>(
                 &parsed,
             );
 
-            if let Some(fixed_error) = fixed_error {
+            if let [fixed_error, ..] = parsed.errors() {
                 if !source_has_errors {
                     // Previous fix introduced a syntax error, abort
                     let fixes = print_diagnostics(diagnostics, path, source_kind);
 
                     let mut syntax_diagnostics = Vec::new();
-                    syntax_error(&mut syntax_diagnostics, &fixed_error, &locator);
+                    syntax_error(&mut syntax_diagnostics, fixed_error, &locator);
                     let syntax_errors = print_diagnostics(syntax_diagnostics, path, &transformed);
 
                     panic!(
