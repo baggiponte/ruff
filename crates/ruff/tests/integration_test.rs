@@ -757,6 +757,40 @@ fn stdin_multiple_parse_error() {
 }
 
 #[test]
+fn parse_error_not_included() {
+    // Select any rule except for `E999`
+    let mut cmd = RuffCheck::default().args(["--select=I"]).build();
+    assert_cmd_snapshot!(cmd
+        .pass_stdin("foo =\n"), @r###"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    -:1:6: E999 SyntaxError: Expected an expression
+    Found 1 error.
+
+    ----- stderr -----
+    error: Failed to parse at 1:6: Expected an expression
+    "###);
+}
+
+#[test]
+fn parse_error_ignored() {
+    // Explicitly ignore the `E999` rule
+    let mut cmd = RuffCheck::default().args(["--ignore=E999"]).build();
+    assert_cmd_snapshot!(cmd
+        .pass_stdin("foo =\n"), @r###"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    -:1:6: E999 SyntaxError: Expected an expression
+    Found 1 error.
+
+    ----- stderr -----
+    error: Failed to parse at 1:6: Expected an expression
+    "###);
+}
+
+#[test]
 fn full_output_preview() {
     let mut cmd = RuffCheck::default().args(["--preview"]).build();
     assert_cmd_snapshot!(cmd

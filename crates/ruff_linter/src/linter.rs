@@ -85,7 +85,6 @@ pub fn check_path(
 ) -> LinterResult<Vec<Diagnostic>> {
     // Aggregate all diagnostics.
     let mut diagnostics = vec![];
-    let mut error = None;
 
     let tokens = parsed.tokens();
     let comment_ranges = indexer.comment_ranges();
@@ -142,67 +141,53 @@ pub fn check_path(
         ));
     }
 
-    // Run the AST-based rules.
-    let use_ast = settings
-        .rules
-        .iter_enabled()
-        .any(|rule_code| rule_code.lint_source().is_ast());
-    let use_imports = !directives.isort.skip_file
-        && settings
+    // Run the AST-based rules only if there are no syntax errors.
+    if parsed.is_valid() {
+        let use_ast = settings
             .rules
             .iter_enabled()
-            .any(|rule_code| rule_code.lint_source().is_imports());
-    if use_ast || use_imports || use_doc_lines {
-        match parsed.as_result() {
-            Ok(parsed) => {
-                let cell_offsets = source_kind.as_ipy_notebook().map(Notebook::cell_offsets);
-                let notebook_index = source_kind.as_ipy_notebook().map(Notebook::index);
-                if use_ast {
-                    diagnostics.extend(check_ast(
-                        parsed,
-                        locator,
-                        stylist,
-                        indexer,
-                        &directives.noqa_line_for,
-                        settings,
-                        noqa,
-                        path,
-                        package,
-                        source_type,
-                        cell_offsets,
-                        notebook_index,
-                    ));
-                }
-                if use_imports {
-                    let import_diagnostics = check_imports(
-                        parsed,
-                        locator,
-                        indexer,
-                        &directives.isort,
-                        settings,
-                        stylist,
-                        package,
-                        source_type,
-                        cell_offsets,
-                    );
-
-                    diagnostics.extend(import_diagnostics);
-                }
-                if use_doc_lines {
-                    doc_lines.extend(doc_lines_from_ast(parsed.suite(), locator));
-                }
+            .any(|rule_code| rule_code.lint_source().is_ast());
+        let use_imports = !directives.isort.skip_file
+            && settings
+                .rules
+                .iter_enabled()
+                .any(|rule_code| rule_code.lint_source().is_imports());
+        if use_ast || use_imports || use_doc_lines {
+            let cell_offsets = source_kind.as_ipy_notebook().map(Notebook::cell_offsets);
+            let notebook_index = source_kind.as_ipy_notebook().map(Notebook::index);
+            if use_ast {
+                diagnostics.extend(check_ast(
+                    parsed,
+                    locator,
+                    stylist,
+                    indexer,
+                    &directives.noqa_line_for,
+                    settings,
+                    noqa,
+                    path,
+                    package,
+                    source_type,
+                    cell_offsets,
+                    notebook_index,
+                ));
             }
-            Err(parse_errors) => {
-                // Always add a diagnostic for the syntax error, regardless of whether
-                // `Rule::SyntaxError` is enabled. We avoid propagating the syntax error
-                // if it's disabled via any of the usual mechanisms (e.g., `noqa`,
-                // `per-file-ignores`), and the easiest way to detect that suppression is
-                // to see if the diagnostic persists to the end of the function.
-                for parse_error in parse_errors {
-                    pycodestyle::rules::syntax_error(&mut diagnostics, parse_error, locator);
-                }
-                // TODO(dhruvmanila): Remove this clone
-                error = parse_errors.iter().next().cloned();
+            if use_imports {
+                let import_diagnostics = check_imports(
+                    parsed,
+                    locator,
+                    indexer,
+                    &directives.isort,
+                    settings,
+                    stylist,
+                    package,
+                    source_type,
+                    cell_offsets,
+                );
+
+                diagnostics.extend(import_diagnostics);
+            }
+            if use_doc_lines {
+                doc_lines.extend(doc_lines_from_ast(parsed.suite(), locator));
             }
         }
     }
@@ -308,7 +293,7 @@ pub fn check_path(
             locator,
             comment_ranges,
             &directives.noqa_line_for,
-            error.is_none(),
+            parsed.is_valid(),
             &per_file_ignores,
             settings,
         );
@@ -319,21 +304,11 @@ pub fn check_path(
         }
     }
 
-    // If there was a syntax error, check if it should be discarded.
-    if error.is_some() {
-        // If the syntax error was removed by _any_ of the above disablement methods (e.g., a
-        // `noqa` directive, or a `per-file-ignore`), discard it.
-        if !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind.rule() == Rule::SyntaxError)
-        {
-            error = None;
-        }
-
-        // If the syntax error _diagnostic_ is disabled, discard the _diagnostic_.
-        if !settings.rules.enabled(Rule::SyntaxError) {
-            diagnostics.retain(|diagnostic| diagnostic.kind.rule() != Rule::SyntaxError);
-        }
+    for parse_error in parsed.errors() {
+        // Always add a diagnostic for the syntax error, regardless of whether `Rule::SyntaxError`
+        // is enabled. This should be done only after all the disablement methods have been
+        // processed like `per-file-ignores` and `noqa` comments.
+        pycodestyle::rules::syntax_error(&mut diagnostics, parse_error, locator);
     }
 
     // Remove fixes for any rules marked as unfixable.
@@ -355,7 +330,7 @@ pub fn check_path(
         }
     }
 
-    LinterResult::new(diagnostics, error)
+    LinterResult::new(diagnostics, parsed.errors().iter().next().cloned())
 }
 
 const MAX_ITERATIONS: usize = 100;
