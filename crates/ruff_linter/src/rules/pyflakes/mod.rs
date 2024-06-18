@@ -2413,7 +2413,7 @@ mod tests {
     fn used_in_lambda() {
         flakes(
             r"import fu;
-        lambda: fu
+lambda: fu
         ",
             &[],
         );
@@ -2432,7 +2432,7 @@ mod tests {
     fn used_in_slice_obj() {
         flakes(
             r#"import fu;
-        "meow"[::fu]
+"meow"[::fu]
         "#,
             &[],
         );
@@ -3033,16 +3033,6 @@ mod tests {
             r#"
         from interior import decorate
         @decorate
-        def f():
-            return "hello"
-        "#,
-            &[],
-        );
-
-        flakes(
-            r#"
-        from interior import decorate
-        @decorate('value", &[]);
         def f():
             return "hello"
         "#,
